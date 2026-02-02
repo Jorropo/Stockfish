@@ -642,7 +642,6 @@ Value Search::Worker::search(
     Move      pv[MAX_PLY + 1];
     StateInfo st;
 
-    Key   posKey;
     Move  move, excludedMove, bestMove;
     Depth extension, newDepth;
     Value bestValue, value, eval, maxValue, probCutBeta;
@@ -653,6 +652,9 @@ Value Search::Worker::search(
 
     SearchedList capturesSearched;
     SearchedList quietsSearched;
+
+    Key posKey = pos.key();
+    prefetch(tt.first_entry(posKey));
 
     // Step 1. Initialize node
     ss->inCheck   = pos.checkers();
@@ -700,7 +702,6 @@ Value Search::Worker::search(
 
     // Step 4. Transposition table lookup
     excludedMove                   = ss->excludedMove;
-    posKey                         = pos.key();
     auto [ttHit, ttData, ttWriter] = tt.probe(posKey);
     // Need further processing of the saved data
     ss->ttHit    = ttHit;
@@ -1512,11 +1513,13 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
     Move      pv[MAX_PLY + 1];
     StateInfo st;
 
-    Key   posKey;
     Move  move, bestMove;
     Value bestValue, value, futilityBase;
     bool  pvHit, givesCheck, capture;
     int   moveCount;
+
+    Key posKey = pos.key();
+    prefetch(tt.first_entry(posKey));
 
     // Step 1. Initialize node
     if (PvNode)
@@ -1540,7 +1543,6 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
     assert(0 <= ss->ply && ss->ply < MAX_PLY);
 
     // Step 3. Transposition table lookup
-    posKey                         = pos.key();
     auto [ttHit, ttData, ttWriter] = tt.probe(posKey);
     // Need further processing of the saved data
     ss->ttHit    = ttHit;
