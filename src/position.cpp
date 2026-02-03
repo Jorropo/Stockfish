@@ -883,8 +883,11 @@ void Position::do_move(Move                      m,
             st->minorPieceKey ^= Zobrist::psq[pc][from] ^ Zobrist::psq[pc][to];
     }
 
-    if (tt)
-        prefetch(tt->first_entry(adjust_key50(k)));
+    Key previouslyPrefetched = 0;
+    if (tt) {
+        previouslyPrefetched = adjust_key50(k);
+        prefetch(tt->first_entry(previouslyPrefetched));
+    }
 
     if (history)
     {
@@ -960,7 +963,7 @@ void Position::do_move(Move                      m,
 
     // Update the key with the final value
     st->key = k;
-    if (tt)
+    if (tt && k != previouslyPrefetched)
         prefetch(tt->first_entry(key()));
 
     // Calculate the repetition info. It is the ply distance from the previous
