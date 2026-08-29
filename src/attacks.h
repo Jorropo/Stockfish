@@ -32,7 +32,7 @@
     #define USE_HYPERBOLA_QUINT
 #elif defined(__loongarch__) && __loongarch_grlen == 64
     #define USE_HYPERBOLA_QUINT
-#elif defined(USE_AVX2)
+#elif defined(USE_AVX2) && !defined(USE_PEXT)
     #include <immintrin.h>
     #define USE_DUAL_HYPERBOLA_QUINT
 #endif
@@ -139,6 +139,31 @@ struct alignas(32) DualMagic {
 
 extern const std::array<DualMagic, SQUARE_NB> DualMagics;
 inline const DualMagic&                       dual_magic(Square s) { return DualMagics[s]; }
+
+#elif defined(USE_PEXT)
+
+// BMI2 backend: PEXT the relevant (edges-excluded) occupancy bits into a compact
+// index, then read the full attack bitboard from this square's table.
+struct SliderEntry {
+    Bitboard        occMask;  // edges-excluded relevant occupancy
+    const Bitboard* attacks;  // per-square table of full attack sets
+};
+
+extern SliderEntry SliderRook[SQUARE_NB];
+extern SliderEntry SliderBishop[SQUARE_NB];
+
+inline Bitboard slider_attacks(const SliderEntry& e, Bitboard occupied) {
+    return e.attacks[pext(occupied, e.occMask)];
+}
+
+// Bishop and rook lookups are independent; interleave their PEXT+load chains so
+// the CPU can pipeline them. Queen and both_attacks_bb() route through here.
+inline std::pair<Bitboard, Bitboard>
+slider_both(const SliderEntry& b, const SliderEntry& r, Bitboard occupied) {
+    const u64 ib = pext(occupied, b.occMask);
+    const u64 ir = pext(occupied, r.occMask);
+    return {b.attacks[ib], r.attacks[ir]};
+}
 
 #else
 // Magic holds all magic bitboards relevant data for a single square
@@ -302,6 +327,20 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
     default :
         return PseudoAttacks[Pt][s];
     }
+#elif defined(USE_PEXT)
+    switch (Pt)
+    {
+    case BISHOP :
+        return slider_attacks(SliderBishop[s], occupied);
+    case ROOK :
+        return slider_attacks(SliderRook[s], occupied);
+    case QUEEN : {
+        const auto [bishop, rook] = slider_both(SliderBishop[s], SliderRook[s], occupied);
+        return bishop | rook;
+    }
+    default :
+        return PseudoAttacks[Pt][s];
+    }
 #else
     switch (Pt)
     {
@@ -319,6 +358,8 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
 inline std::pair<Bitboard, Bitboard> both_attacks_bb(Square s, Bitboard occupied) {
 #ifdef USE_DUAL_HYPERBOLA_QUINT
     return dual_magic(s).both_attacks_bb(occupied);
+#elif defined(USE_PEXT)
+    return slider_both(SliderBishop[s], SliderRook[s], occupied);
 #else
     return {attacks_bb<BISHOP>(s, occupied), attacks_bb<ROOK>(s, occupied)};
 #endif

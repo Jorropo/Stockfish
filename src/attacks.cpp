@@ -19,6 +19,7 @@
 #include "attacks.h"
 
 #include <array>
+#include <vector>
 
 #include "misc.h"
 
@@ -30,7 +31,7 @@ Bitboard RayPassBB[SQUARE_NB][SQUARE_NB];
 
 namespace {
 
-#ifndef USE_DUAL_HYPERBOLA_QUINT
+#if !defined(USE_DUAL_HYPERBOLA_QUINT) && !defined(USE_PEXT)
 alignas(64) Magic Magics[SQUARE_NB][2];
 #endif
 
@@ -95,6 +96,52 @@ static constexpr auto make_dual_magics() {
 }
 
 alignas(64) extern constexpr std::array<DualMagic, SQUARE_NB> DualMagics = make_dual_magics();
+
+#elif defined(USE_PEXT)
+
+SliderEntry SliderRook[SQUARE_NB];
+SliderEntry SliderBishop[SQUARE_NB];
+
+namespace {
+
+std::vector<Bitboard> SliderTable;  // full attack sets, rook then bishop, packed
+
+void init_slider_piece(PieceType pt, SliderEntry entries[], size_t& off) {
+    for (Square s = SQ_A1; s <= SQ_H8; ++s)
+    {
+        Bitboard edges = ((Rank1BB | Rank8BB) & ~rank_bb(s)) | ((FileABB | FileHBB) & ~file_bb(s));
+
+        SliderEntry& e = entries[s];
+        e.occMask      = sliding_attack(pt, s, 0) & ~edges;
+        e.attacks      = &SliderTable[off];
+
+        Bitboard b = 0;
+        do
+        {
+            SliderTable[off + pext(b, e.occMask)] = sliding_attack(pt, s, b);
+            b                                     = (b - e.occMask) & e.occMask;
+        } while (b);
+
+        off += size_t(1) << popcount(e.occMask);
+    }
+}
+
+void init_sliders() {
+    size_t total = 0;
+    for (Square s = SQ_A1; s <= SQ_H8; ++s)
+    {
+        Bitboard edges = ((Rank1BB | Rank8BB) & ~rank_bb(s)) | ((FileABB | FileHBB) & ~file_bb(s));
+        for (PieceType pt : {ROOK, BISHOP})
+            total += size_t(1) << popcount(sliding_attack(pt, s, 0) & ~edges);
+    }
+    SliderTable.assign(total, 0);
+
+    size_t off = 0;
+    init_slider_piece(ROOK, SliderRook, off);
+    init_slider_piece(BISHOP, SliderBishop, off);
+}
+
+}  // namespace
 
 #else
 
@@ -165,6 +212,8 @@ void init() {
 
 #ifdef USE_HYPERBOLA_QUINT
     init_magics(Magics);
+#elif defined(USE_PEXT)
+    init_sliders();
 #elif !defined(USE_DUAL_HYPERBOLA_QUINT)
     init_magics(ROOK, RookTable.data(), Magics);
     init_magics(BISHOP, BishopTable.data(), Magics);
@@ -188,7 +237,7 @@ void init() {
     }
 }
 
-#ifndef USE_DUAL_HYPERBOLA_QUINT
+#if !defined(USE_DUAL_HYPERBOLA_QUINT) && !defined(USE_PEXT)
 const Magic& magic(Square s, PieceType pt) {
     assert((pt == BISHOP || pt == ROOK) && is_ok(s));
     return Magics[s][pt - BISHOP];
